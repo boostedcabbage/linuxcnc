@@ -1,0 +1,134 @@
+//   This is a component for LinuxCNC HAL
+//   Copyright 2006 John Kasunich <jmkasunich@users.sourceforge.net>
+//
+//   This program is free software; you can redistribute it and/or modify
+//   it under the terms of the GNU General Public License as published by
+//   the Free Software Foundation; either version 2 of the License, or
+//   (at your option) any later version.
+//
+//   This program is distributed in the hope that it will be useful,
+//   but WITHOUT ANY WARRANTY; without even the implied warranty of
+//   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//   GNU General Public License for more details.
+//
+//   You should have received a copy of the GNU General Public License
+//   along with this program; if not, write to the Free Software
+//   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+component delayshot "delayed pulse generator";
+
+description """Creates a delayed variable width pulse.""";
+
+pin in bit in "Trigger input";
+pin in bit reset "Reset";
+pin out bit out "Active high delay start";
+pin out bit out_not "Active low delay start";
+pin in float delay = 0 "Delay after input trigger in seconds";
+pin in float width = 0 "Pulse width in seconds";
+
+param rw bit rising = TRUE "Trigger on rising edge";
+param rw bit falling = FALSE "Trigger on falling edge";
+
+option data internal;
+option extra_setup yes;
+
+function _ "Produce a delayed output pulse from input pulse";
+license "GPL";
+author "boostedcabbage";
+;;
+
+typedef struct
+{
+    double timer;
+    double timer2;
+    char old_in;
+    int waiting_for_delay;
+} internal;
+
+EXTRA_SETUP()
+{
+    data.timer = 0.0;
+    data.timer2 = 0.0;
+    data.old_in = 0;
+    data.waiting_for_delay = 0;
+    return 0;
+}
+
+FUNCTION(_)
+{
+    int new, old, trigger_delay, trigger_pulse;
+
+    if (reset)
+    {
+        data.timer = 0.0;
+        data.timer2 = 0.0;
+        data.old_in = 0;
+        data.waiting_for_delay = 0;
+        out = 0;
+        out_not = 1;
+        return;
+    }
+
+    new = in;
+    old = data.old_in;
+    trigger_delay = 0;
+    trigger_pulse = 0;
+
+    // detect edges
+    if (new && (!old) && rising)
+    {
+        trigger_delay = 1;
+    }
+
+    if (old && (!new) && falling)
+    {
+        trigger_delay = 1;
+    }
+
+    data.old_in = new;
+
+    // is a delay already running?
+    if (data.timer > 0.0)
+    {
+        data.timer -= period * 0.000000001;
+        if (data.timer < 0.0)
+        {
+            data.timer = 0.0;
+        }
+    }
+
+    // is a pulse already running?
+    if (data.timer2 > 0.0)
+    {
+        data.timer2 -= period * 0.000000001;
+        if (data.timer2 < 0.0)
+        {
+            data.timer2 = 0.0;
+        }
+    }
+
+    //start pulse timer if delay timer has expired
+    if(data.waiting_for_delay && data.timer <= 0) {
+        data.waiting_for_delay = 0;
+        data.timer2 = width;
+    }
+
+    // have edge trigger? start delay timer
+    if (trigger_delay)
+    {
+        data.timer = delay;
+        data.waiting_for_delay = 1;
+    }
+
+    // drive outputs
+    if (data.timer2 > 0.0)
+    {
+        out = 1;
+        out_not = 0;
+    }
+    else
+    {
+        out = 0;
+        out_not = 1;
+    }
+}
