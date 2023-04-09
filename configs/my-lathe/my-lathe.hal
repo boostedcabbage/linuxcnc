@@ -2,37 +2,43 @@
 # If you make changes to this file, they will be
 # overwritten when you run stepconf again
 loadrt [KINS]KINEMATICS
-loadrt [EMCMOT]EMCMOT base_period_nsec=[EMCMOT]BASE_PERIOD servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS
+loadrt [EMCMOT]EMCMOT base_thread_fp=1 base_period_nsec=[EMCMOT]BASE_PERIOD servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS
 loadrt hal_parport cfg="0 out"
 setp parport.0.reset-time 5000
 loadrt stepgen step_type=0,0
 loadrt encoder num_chan=1
-loadrt abs count=1
+loadrt abs count=2
 loadrt scale count=2
-loadrt lowpass count=1
+loadrt lowpass count=2
 loadrt delayshot count=1
 loadrt pid num_chan=1
 loadrt limit1 count=1
 loadrt lincurve count=1 personality=16
+loadrt near
 
 addf parport.0.read base-thread
 addf stepgen.make-pulses base-thread
 addf encoder.update-counters base-thread
 addf parport.0.write base-thread
 addf parport.0.reset base-thread
-addf delayshot.0 servo-thread
+addf delayshot.0 base-thread
+addf near.0 base-thread
 
 addf stepgen.capture-position servo-thread
 addf encoder.capture-position servo-thread
 addf motion-command-handler servo-thread
 addf motion-controller servo-thread
 addf stepgen.update-freq servo-thread
+addf abs.1 base-thread
 addf abs.0 servo-thread
+addf limit1.0 base-thread
 addf scale.0 servo-thread
-addf scale.1 servo-thread
+addf scale.1 base-thread
 addf lowpass.0 servo-thread
-addf lincurve.0 servo-thread
-addf pid.0.do-pid-calcs servo-thread
+addf lowpass.1 base-thread
+addf lincurve.0 base-thread
+addf pid.0.do-pid-calcs base-thread
+
 
 #Scale factor, in counts per length unit. For example, if position-scale is 500, then 1000 counts of the encoder will be reported as a position of 2.0 units
 setp encoder.0.position-scale 360.000000
@@ -42,10 +48,18 @@ setp encoder.0.counter-mode 1
 
 net spindle-position encoder.0.position => spindle.0.revs
 
+# connect the output to the spindle-at-speed input
+net spindle-at-speed spindle.0.at-speed <= near.0.out
+
+# set the spindle speed inputs to agree if within 1%
+setp near.0.scale 1.01
+
+setp lowpass.1.gain 0.01
+
 #revolutions per second
 net spindle-velocity-feedback-rps encoder.0.velocity => spindle.0.speed-in
-net blah4-rpm encoder.0.velocity-rpm => pid.0.feedback
-
+net pid-feedback encoder.0.velocity-rpm => lowpass.1.in => near.0.in2
+net pid-lowpass lowpass.1.out => pid.0.feedback
 net spindle-index-enable encoder.0.index-enable <=> spindle.0.index-enable
 
 #When this is not done, and FF1 is nonzero, a step change in the input command causes a single-cycle spike in the PID output.
@@ -71,9 +85,14 @@ setp lincurve.0.x-val-13 0.875000
 setp lincurve.0.x-val-14 0.937500
 setp lincurve.0.x-val-15 1
 
-setp lincurve.0.y-val-00 0.006990
-setp lincurve.0.y-val-01 0.006413
-setp lincurve.0.y-val-02 0.005954
+#setp lincurve.0.y-val-00 0.006990
+#setp lincurve.0.y-val-00 0.0064
+#setp lincurve.0.y-val-01 0.006413
+#setp lincurve.0.y-val-02 0.005954
+#setp lincurve.0.y-val-00 0.006954
+setp lincurve.0.y-val-00 0.006
+setp lincurve.0.y-val-01 0.005554
+setp lincurve.0.y-val-02 0.005554
 setp lincurve.0.y-val-03 0.005552
 setp lincurve.0.y-val-04 0.005183
 setp lincurve.0.y-val-05 0.004834
@@ -86,21 +105,25 @@ setp lincurve.0.y-val-11 0.002774
 setp lincurve.0.y-val-12 0.002372
 setp lincurve.0.y-val-13 0.001912
 setp lincurve.0.y-val-14 0.001334
-setp lincurve.0.y-val-15 0
+setp lincurve.0.y-val-15 0.001
 
-setp scale.1.gain 0.01
+setp scale.1.gain 0.001
 
 setp pid.0.enable True
-#setp pid.0.Pgain 0.74
-setp pid.0.Pgain 0.3
-setp pid.0.Igain 0
+setp pid.0.Pgain 0.5
+setp pid.0.Igain 0.7
 setp pid.0.Dgain 0
+setp pid.0.maxoutput 1000
+net pid-error pid.0.error
+
+
+setp limit1.0.min 0
+setp limit1.0.max 1000
 
 #net spindle-speed-scale spindle.0.speed-out-abs => scale.1.in 
-#might have to scale this differently
-net pid-output pid.0.output => scale.1.in
-#net pid-spindle spindle.0.speed-out-rps-abs => pid.0.command
-net blah4 spindle.0.speed-out-abs => pid.0.command
+net pid-limit pid.0.output => limit1.0.in
+net pid-output limit1.0.out => scale.1.in
+net pid-command spindle.0.speed-out-abs => pid.0.command => near.0.in1
 net scaled-lincurve scale.1.out => lincurve.0.in 
 net lincurve-delayshot lincurve.0.out => delayshot.0.delay
 
